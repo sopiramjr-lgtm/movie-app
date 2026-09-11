@@ -1,0 +1,3 @@
+spring:
+  application:
+    name: movie_app_api
