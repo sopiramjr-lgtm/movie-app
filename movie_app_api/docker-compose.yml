@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: movie_postgres
+    environment:
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "${DB_PORT}:5432"
+    volumes:
+      - movie_db_data:/var/lib/postgresql/data
+      # This line tells Postgres to run your script on first boot
+      - ./init-dbs.sql:/docker-entrypoint-initdb.d/init-dbs.sql
+    restart: unless-stopped
+
+  # MinIO Object Storage (S3 Compatible)
+  minio:
+    image: minio/minio:latest
+    container_name: movie_minio
+    command: server /data --console-address ":${MINIO_CONSOLE_PORT}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    ports:
+      - "${MINIO_PORT}:9000"
+      - "${MINIO_CONSOLE_PORT}:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  # Keycloak Identity Provider
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.1
+    container_name: movie_keycloak
+    command: start-dev # Runs in development mode
+    environment:
+      # Database and Admin Configs
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres
+      KC_DB_URL_DATABASE: keycloak_db # <--- Pointed exclusively to keycloak_db
+      KC_DB_USERNAME: ${DB_USERNAME}
+      KC_DB_PASSWORD: ${DB_PASSWORD}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+
+      # Keycloak SMTP Email Configs (from .env)
+      KC_SPI_EMAIL_SENDER_DEFAULT_HOST: ${MAIL_HOST}
+      KC_SPI_EMAIL_SENDER_DEFAULT_PORT: ${MAIL_PORT}
+      KC_SPI_EMAIL_SENDER_DEFAULT_FROM: ${MAIL_FROM_ADDRESS}
+      KC_SPI_EMAIL_SENDER_DEFAULT_USER: ${MAIL_USERNAME}
+      KC_SPI_EMAIL_SENDER_DEFAULT_PASSWORD: ${MAIL_PASSWORD}
+      KC_SPI_EMAIL_SENDER_DEFAULT_SSL: "true"
+      KC_SPI_EMAIL_SENDER_DEFAULT_AUTH: "true"
+    ports:
+      - "${KEYCLOAK_PORT}:8080"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+volumes:
+  movie_db_data:
+  minio_data:

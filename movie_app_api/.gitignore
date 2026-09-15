@@ -1,4 +1,4 @@
-HELP.md
+README.md
 .gradle
 build/
 !gradle/wrapper/gradle-wrapper.jar
@@ -35,3 +35,18 @@ out/
 
 ### VS Code ###
 .vscode/
+
+# Environment files
+.env
+.env.*
+**/.env
+**/.env.*
+# ...except the template itself — meant to be committed and shared (see
+# AGENTS.md's "environment contract" reference), unlike every other .env.*
+# variant above which holds real, per-environment secrets.
+!.env.example
+!**/.env.example
+
+# Exported Docker images
+*.tar
+*.tar.gz.env

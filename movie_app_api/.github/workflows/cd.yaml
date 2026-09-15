@@ -1,0 +1,506 @@
+name: CD Pipeline
+
+# CI (ci.yaml) only builds/tests/analyzes and never deploys — this is the one
+# and only place backend deployment happens: called directly as a job from
+# ci.yaml right after tests pass on dev (workflow_call), or triggered by hand
+# (workflow_dispatch). Deliberately NOT a workflow_run trigger: workflow_run
+# always loads the *default branch's* copy of this file regardless of which
+# branch actually triggered it, which silently ran a long-stale deploy script
+# here once dev's version of this file diverged from main's. A workflow_call
+# job instead inherits the caller's own ref/commit, so it always runs whatever
+# is actually on dev.
+on:
+  workflow_dispatch:
+
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Backend to AWS
+    runs-on: ubuntu-latest
+
+    # Covers both triggers: a manual dispatch picks its own ref in the GitHub
+    # UI, and a workflow_call run inherits the calling workflow's ref (ci.yaml
+    # only calls this job when github.ref == 'refs/heads/dev' itself, but this
+    # is kept here too so a manual dispatch against any other branch/ref is
+    # still refused).
+    if: github.ref == 'refs/heads/dev'
+
+    # Prevents an automatic post-CI deploy and a manual redeploy from
+    # touching the backend at the same time.
+    concurrency:
+      group: qubase-backend-production-deploy
+      cancel-in-progress: false
+
+    environment:
+      name: production
+      url: https://api.qubase.site
+
+    env:
+      AWS_HOST: ${{ secrets.AWS_HOST }}
+      AWS_USER: ${{ secrets.AWS_USER }}
+
+    steps:
+      # --------------------------------------------------------
+      # SSH
+      # --------------------------------------------------------
+      - name: Configure SSH
+        shell: bash
+        env:
+          AWS_SSH_KEY: ${{ secrets.AWS_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+
+          echo "=== Configuring SSH ==="
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          if [ -z "$AWS_SSH_KEY" ]; then
+            echo "ERROR: AWS_SSH_KEY is empty"
+            exit 1
+          fi
+
+          printf '%s\n' "$AWS_SSH_KEY" \
+            | tr -d '\r' \
+            > ~/.ssh/qubase-new-aws
+
+          chmod 600 ~/.ssh/qubase-new-aws
+
+          HOST="$(
+            printf '%s' "$AWS_HOST" \
+            | tr -d '\r\n[:space:]'
+          )"
+
+          USER="$(
+            printf '%s' "$AWS_USER" \
+            | tr -d '\r\n[:space:]'
+          )"
+
+          if [ -z "$HOST" ]; then
+            echo "ERROR: AWS_HOST is empty"
+            exit 1
+          fi
+
+          if [ -z "$USER" ]; then
+            echo "ERROR: AWS_USER is empty"
+            exit 1
+          fi
+
+          if [[ "$HOST" == http://* ]]; then
+            echo "ERROR: AWS_HOST must not contain http://"
+            exit 1
+          fi
+
+          if [[ "$HOST" == https://* ]]; then
+            echo "ERROR: AWS_HOST must not contain https://"
+            exit 1
+          fi
+
+          if [[ "$HOST" == *"@"* ]]; then
+            echo "ERROR: AWS_HOST must contain only an IP or hostname"
+            exit 1
+          fi
+
+          echo "AWS host configured."
+
+          echo
+          echo "=== Checking SSH port 22 ==="
+
+          if timeout 15 bash -c \
+            "cat < /dev/null > /dev/tcp/$HOST/22"
+          then
+            echo "Port 22 is reachable."
+          else
+            echo "ERROR: Cannot reach backend server on port 22."
+            exit 1
+          fi
+
+          touch ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+          echo "SSH configuration completed."
+
+
+      - name: Test SSH connection
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          HOST="$(
+            printf '%s' "$AWS_HOST" \
+            | tr -d '\r\n[:space:]'
+          )"
+
+          USER="$(
+            printf '%s' "$AWS_USER" \
+            | tr -d '\r\n[:space:]'
+          )"
+
+          echo "=== Testing SSH connection ==="
+
+          ssh \
+            -i ~/.ssh/qubase-new-aws \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o StrictHostKeyChecking=accept-new \
+            "$USER@$HOST" \
+            "echo 'SSH connection successful'"
+
+
+      # --------------------------------------------------------
+      # DEPLOY
+      # --------------------------------------------------------
+      - name: Deploy backend
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          HOST="$(
+            printf '%s' "$AWS_HOST" \
+            | tr -d '\r\n[:space:]'
+          )"
+
+          USER="$(
+            printf '%s' "$AWS_USER" \
+            | tr -d '\r\n[:space:]'
+          )"
+
+          ssh \
+            -i ~/.ssh/qubase-new-aws \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o StrictHostKeyChecking=accept-new \
+            "$USER@$HOST" \
+            'bash -se' <<'EOF'
+
+          set -Eeuo pipefail
+
+          DEPLOY_DIR="$HOME/qubase-backend-src"
+          BRANCH="dev"
+
+          echo
+          echo "=========================================="
+          echo " Qubase Backend Deployment"
+          echo "=========================================="
+
+          # ----------------------------------------------------
+          # CHECK SERVER
+          # ----------------------------------------------------
+          echo
+          echo "=== Checking deployment directory ==="
+
+          if [ ! -d "$DEPLOY_DIR" ]; then
+            echo "ERROR: Deployment directory does not exist:"
+            echo "$DEPLOY_DIR"
+            exit 1
+          fi
+
+          cd "$DEPLOY_DIR"
+
+          echo
+          echo "=== Checking Git repository ==="
+
+          if [ ! -d .git ]; then
+            echo "ERROR: $DEPLOY_DIR is not a Git repository"
+            exit 1
+          fi
+
+          echo
+          echo "=== Checking production environment ==="
+
+          if [ ! -f .env ]; then
+            echo "ERROR: $DEPLOY_DIR/.env is missing"
+            exit 1
+          fi
+
+          if git check-ignore -q .env; then
+            echo ".env is ignored by Git."
+          else
+            echo "ERROR: .env is not ignored by Git."
+            exit 1
+          fi
+
+          chmod 600 .env
+
+
+          # ----------------------------------------------------
+          # UPDATE SOURCE
+          # ----------------------------------------------------
+          echo
+          echo "=== Fetching latest dev branch ==="
+
+          git fetch origin "$BRANCH"
+
+          git checkout "$BRANCH"
+
+          git reset \
+            --hard \
+            "origin/$BRANCH"
+
+          echo
+          echo "=== Current deployed commit ==="
+
+          git log -1 --oneline
+
+
+          # ----------------------------------------------------
+          # CHECK DOCKER
+          # ----------------------------------------------------
+          echo
+          echo "=== Checking Docker networks ==="
+
+          if ! docker network inspect \
+            qubase_proxy_net \
+            >/dev/null 2>&1
+          then
+            echo "ERROR: qubase_proxy_net does not exist"
+            exit 1
+          fi
+
+          if ! docker network inspect \
+            qubase_backend_net \
+            >/dev/null 2>&1
+          then
+            echo "ERROR: qubase_backend_net does not exist"
+            exit 1
+          fi
+
+
+          echo
+          echo "=== Validating Docker Compose ==="
+
+          docker compose config --quiet
+
+
+          # ----------------------------------------------------
+          # SAVE CURRENT IMAGE
+          # ----------------------------------------------------
+          echo
+          echo "=== Saving previous backend image ==="
+
+          if docker image inspect \
+            qubase-backend:latest \
+            >/dev/null 2>&1
+          then
+            docker tag \
+              qubase-backend:latest \
+              qubase-backend:previous
+
+            echo "Previous image saved."
+          else
+            echo "No previous backend image found."
+          fi
+
+
+          # ----------------------------------------------------
+          # BUILD
+          # ----------------------------------------------------
+          echo
+          echo "=== Building backend image ==="
+
+          docker build \
+            --pull \
+            -t qubase-backend:latest \
+            .
+
+
+          # ----------------------------------------------------
+          # REDEPLOY BACKEND ONLY
+          # ----------------------------------------------------
+          echo
+          echo "=== Recreating backend container ==="
+
+          docker compose up \
+            -d \
+            --force-recreate \
+            --no-deps \
+            backend
+
+
+          # ----------------------------------------------------
+          # WAIT FOR APPLICATION
+          # ----------------------------------------------------
+          echo
+          echo "=== Waiting for Spring Boot ==="
+
+          READY=false
+
+          for ATTEMPT in $(seq 1 36); do
+
+            RUNNING="$(
+              docker inspect \
+                --format='{{.State.Running}}' \
+                qubase-backend \
+                2>/dev/null \
+                || echo false
+            )"
+
+            if [ "$RUNNING" != "true" ]; then
+              echo
+              echo "ERROR: Backend container stopped during startup"
+
+              docker inspect \
+                qubase-backend \
+                --format='status={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}' \
+                || true
+
+              docker logs \
+                --tail 250 \
+                qubase-backend \
+                || true
+
+              exit 1
+            fi
+
+
+            if docker logs \
+              qubase-backend \
+              2>&1 \
+              | grep -q "Started QubaseApplication"
+            then
+              READY=true
+
+              echo
+              echo "Backend started successfully."
+              echo "Startup attempt: $ATTEMPT"
+
+              break
+            fi
+
+
+            echo "Waiting for backend... $ATTEMPT/36"
+
+            sleep 5
+          done
+
+
+          if [ "$READY" != "true" ]; then
+            echo
+            echo "ERROR: Backend did not start within 180 seconds"
+
+            docker logs \
+              --tail 250 \
+              qubase-backend \
+              || true
+
+            exit 1
+          fi
+
+
+          # ----------------------------------------------------
+          # NETWORK INFO
+          # ----------------------------------------------------
+          echo
+          echo "=== Backend container networks ==="
+
+          docker inspect \
+            qubase-backend \
+            --format='{{range $name, $network := .NetworkSettings.Networks}}{{println $name $network.IPAddress}}{{end}}'
+
+
+          # ----------------------------------------------------
+          # PUBLIC API TEST
+          # ----------------------------------------------------
+          echo
+          echo "=== Testing public API ==="
+
+          PUBLIC_READY=false
+
+          for ATTEMPT in $(seq 1 12); do
+
+            HTTP_STATUS="$(
+              curl \
+                --silent \
+                --show-error \
+                --output /dev/null \
+                --write-out '%{http_code}' \
+                --connect-timeout 10 \
+                --max-time 20 \
+                https://api.qubase.site/ \
+                || true
+            )"
+
+            echo "Public API attempt $ATTEMPT: HTTP $HTTP_STATUS"
+
+
+            if [[ "$HTTP_STATUS" =~ ^[0-9]{3}$ ]] &&
+               [ "$HTTP_STATUS" -ge 200 ] &&
+               [ "$HTTP_STATUS" -lt 500 ]
+            then
+              PUBLIC_READY=true
+              break
+            fi
+
+            sleep 5
+          done
+
+
+          if [ "$PUBLIC_READY" != "true" ]; then
+            echo
+            echo "ERROR: Public backend health check failed"
+
+            echo
+            echo "=== Backend logs ==="
+
+            docker logs \
+              --tail 250 \
+              qubase-backend \
+              || true
+
+            echo
+            echo "=== Backend Traefik logs ==="
+
+            docker logs \
+              --tail 150 \
+              qubase-backend-traefik \
+              || true
+
+            exit 1
+          fi
+
+
+          # ----------------------------------------------------
+          # STATUS
+          # ----------------------------------------------------
+          echo
+          echo "=== Deployment status ==="
+
+          docker compose ps
+
+          echo
+          echo "=== Running containers ==="
+
+          docker ps \
+            --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+
+
+          # ----------------------------------------------------
+          # CLEANUP
+          # ----------------------------------------------------
+          echo
+          echo "=== Cleaning dangling Docker images ==="
+
+          docker image prune -f
+
+
+          echo
+          echo "=========================================="
+          echo " Deployment completed successfully"
+          echo "=========================================="
+
+          EOF
+
+
+      - name: Remove temporary SSH key
+        if: always()
+        shell: bash
+        run: |
+          rm -f ~/.ssh/qubase-new-aws
