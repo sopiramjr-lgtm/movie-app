@@ -1,0 +1,15 @@
+{
+  "hero": {
+    "title": "Welcome to KhmerFlix",
+    "subtitle": "Stream unlimited movies and TV series in Cambodia.",
+    "button": "Start Watching",
+    "bg": "https://image.tmdb.org/t/p/original/8Y43POKjjKDGI9MH89NW0NAzzp8.jpg"
+  },
+  "footer": {
+    "about": "KhmerFlix is the leading streaming platform in Cambodia.",
+    "email": "support@khmerflix.com",
+    "phone": "+855 96 914 4183",
+    "fb": "https://facebook.com",
+    "tw": "https://twitter.com"
+  }
+}
