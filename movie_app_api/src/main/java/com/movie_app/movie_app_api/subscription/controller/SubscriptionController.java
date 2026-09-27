@@ -53,6 +53,26 @@ public class SubscriptionController {
                 .body(ApiResponse.success("Successfully subscribed", subscription));
     }
 
+    @Operation(summary = "Get subscription payment status", description = "Polls the current status of a pending subscription without activating it. Use for auto-refresh polling.")
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/{subscriptionId}/status")
+    public ResponseEntity<ApiResponse<SubscriptionResponse>> getSubscriptionStatus(
+            @Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID subscriptionId) {
+        SubscriptionResponse subscription = subscriptionService.getSubscriptionStatus(jwt.getSubject(), subscriptionId);
+        return ResponseEntity.ok(ApiResponse.success(subscription));
+    }
+
+    @Operation(summary = "Verify subscription payment", description = "Verifies KHQR payment and activates the subscription.")
+    @SecurityRequirement(name = "bearerAuth")
+    @PostMapping("/{subscriptionId}/verify-payment")
+    public ResponseEntity<ApiResponse<SubscriptionResponse>> verifyPayment(
+            @Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID subscriptionId) {
+        SubscriptionResponse subscription = subscriptionService.verifyPayment(jwt.getSubject(), subscriptionId);
+        return ResponseEntity.ok(ApiResponse.success("Payment verified and subscription activated", subscription));
+    }
+
     @Operation(summary = "Cancel subscription", description = "Cancels auto-renewal on an active personal subscription.")
     @SecurityRequirement(name = "bearerAuth")
     @PostMapping("/{subscriptionId}/cancel")

@@ -27,5 +27,14 @@ public class AdminAuditLog {
 
     private UUID targetId;
 
+    @Column(length = 1000)
+    private String details;
+
+    @Column(name = "ip_address", length = 50)
+    private String ipAddress;
+
+    @Column(length = 20)
+    private String status;
+
     private LocalDateTime createdAt;
 }

@@ -43,6 +43,9 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(
+                List.of("http://localhost:3000")
+        );
         configuration.setAllowedOriginPatterns(List.of("*"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Origin", "Refresh-Token"));
@@ -112,7 +115,7 @@ public class SecurityConfig {
                                 "/scalar"
                         ).permitAll()
                         .requestMatchers("/api/v1/auth/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/contents/**", "/api/v1/genres/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/contents/**", "/api/v1/genres/**", "/api/v1/subscriptions/plans").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
@@ -138,7 +141,8 @@ public class SecurityConfig {
 
             return roles.stream()
                     .map(Object::toString)
-                    .map(role -> (GrantedAuthority) new SimpleGrantedAuthority("ROLE_" + role))
+                    .map(role -> role.startsWith("ROLE_") ? role : "ROLE_" + role)
+                    .map(role -> (GrantedAuthority) new SimpleGrantedAuthority(role))
                     .collect(Collectors.toSet());
         };
 

@@ -60,14 +60,23 @@ public class AdminServiceImpl implements AdminService {
     @Override
     @Transactional
     public void logAction(String keycloakId, String action, String targetType, UUID targetId) {
+        logAction(keycloakId, action, targetType, targetId, null, "127.0.0.1", "SUCCESS");
+    }
+
+    @Override
+    @Transactional
+    public void logAction(String keycloakId, String action, String targetType, UUID targetId, String details, String ipAddress, String status) {
         User admin = userRepository.findByKeycloakId(keycloakId)
-                .orElseThrow(() -> new ResourceNotFoundException("Admin user not found"));
+                .orElse(null);
 
         AdminAuditLog log = AdminAuditLog.builder()
                 .admin(admin)
                 .action(action)
                 .targetType(targetType)
                 .targetId(targetId)
+                .details(details)
+                .ipAddress(ipAddress != null ? ipAddress : "127.0.0.1")
+                .status(status != null ? status : "SUCCESS")
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -80,5 +89,11 @@ public class AdminServiceImpl implements AdminService {
         return auditLogRepository.findAllByOrderByCreatedAtDesc().stream()
                 .map(adminMapper::toResponse)
                 .toList();
+    }
+
+    @Override
+    @Transactional
+    public void clearAuditLogs() {
+        auditLogRepository.deleteAll();
     }
 }

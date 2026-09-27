@@ -47,7 +47,7 @@ keycloak:
   server-url: http://localhost:${KEYCLOAK_PORT:8080}
   realm: ${KEYCLOAK_REALM:movie-app-realm}
   client-id: ${KEYCLOAK_CLIENT_ID:movie-app-client}
-  client-secret: ${KEYCLOAK_CLIENT_SECRET:Y8BAbts3sDmYrffR3JvR0dYAOx16KZYu}
+  client-secret: ${KEYCLOAK_CLIENT_SECRET:NXLH0qSVOgy0eXczjFfDiZrX239D91W5}
   default-role: ROLE_USER
 
 minio:
@@ -61,3 +61,12 @@ springdoc:
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
+khqr:
+  base-url: ${BAKONG_BASE_URL:https://api-bakong.nbc.gov.kh}
+  token: ${BAKONG_TOKEN:eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJkYXRhIjp7ImlkIjoiOTQ3NjEzNTU0YjE0NDkzOCJ9LCJpYXQiOjE3ODk4ODc3MzMsImV4cCI6MTc5NzY2MzczM30.3pY49VJkmGhxlD8iJhmyKxA3L-2pLk3j1LMUqHgMyNI}
+  account: ${BAKONG_ACCOUNT_ID:sorn_sophiram@bkrt}
+  merchant-name: ${BAKONG_MERCHANT_NAME:SOPHIRAM SORN}
+  merchant-city: ${BAKONG_MERCHANT_CITY:Phnom Penh}
+  phone: ${BAKONG_PHONE:0969144183}
+  store-label: ${BAKONG_STORE_LABEL:KhmerFlixMovie}
+  usd-to-khr-rate: ${BAKONG_USD_TO_KHR_RATE:4100}

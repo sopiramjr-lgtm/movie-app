@@ -9,5 +9,7 @@ import java.util.UUID;
 public interface AdminService {
     AdminDashboardResponse getDashboardStats();
     void logAction(String keycloakId, String action, String targetType, UUID targetId);
+    void logAction(String keycloakId, String action, String targetType, UUID targetId, String details, String ipAddress, String status);
     List<AuditLogResponse> getRecentAuditLogs();
+    void clearAuditLogs();
 }

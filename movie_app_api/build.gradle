@@ -51,6 +51,7 @@ dependencies {
     implementation 'io.minio:minio:8.5.7'
 
     // === Utilities ===
+    implementation 'kh.gov.nbc.bakong_khqr:sdk-java:1.0.0.17'
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'

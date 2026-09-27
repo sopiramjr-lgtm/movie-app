@@ -9,8 +9,12 @@ public record AuditLogResponse(
         UUID id,
         UUID adminId,
         String adminEmail,
+        String adminName,
         String action,
         String targetType,
         UUID targetId,
+        String details,
+        String ipAddress,
+        String status,
         LocalDateTime createdAt
 ) {}

@@ -33,6 +33,15 @@ public class AdminGenreController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Genre created successfully", genre));
     }
 
+    @Operation(summary = "Update genre", description = "Updates an existing genre.")
+    @PutMapping("/{id}")
+    public ResponseEntity<ApiResponse<GenreResponse>> updateGenre(
+            @PathVariable UUID id,
+            @RequestBody @Valid GenreRequest request) {
+        GenreResponse genre = genreService.updateGenre(id, request);
+        return ResponseEntity.ok(ApiResponse.success("Genre updated successfully", genre));
+    }
+
     @Operation(summary = "Delete genre", description = "Removes a genre from the platform.")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> deleteGenre(@PathVariable UUID id) {

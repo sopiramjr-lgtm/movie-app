@@ -9,13 +9,14 @@ import com.movie_app.movie_app_api.auth.dto.response.LoginResponse;
 import com.movie_app.movie_app_api.auth.dto.response.SignUpResponse;
 import com.movie_app.movie_app_api.auth.service.AuthService;
 import com.movie_app.movie_app_api.user.entity.User;
+import com.movie_app.movie_app_api.user.mapper.UserMapper;
+import com.movie_app.movie_app_api.user.repository.UserRepository;
 import jakarta.ws.rs.core.Response;
 import org.keycloak.admin.client.CreatedResponseUtil;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
-import com.movie_app.movie_app_api.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,6 +39,7 @@ public class AuthServiceImpl implements AuthService {
     private final Keycloak keycloak;
     private final RestClient keycloakRestClient;
     private final UserRepository userRepository;
+    private final UserMapper userMapper;
 
     @Value("${keycloak.realm}")
     private String realm;
@@ -54,12 +56,43 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public SignUpResponse signup(SignUpRequest request) {
+        if (userRepository.existsByEmail(request.email())) {
+            throw new BadRequestException("Email is already registered");
+        }
+        
         UserRepresentation userRepresentation = buildUserRepresentation(request);
 
         try (Response response = keycloak.realm(realm).users().create(userRepresentation)) {
             if (response.getStatus() == 409) {
+                // If Keycloak user exists but local DB record is missing (orphaned), repair and complete registration
+                var localUserOpt = userRepository.findByEmail(request.email());
+                if (localUserOpt.isEmpty()) {
+                    var kcUsers = keycloak.realm(realm).users().searchByEmail(request.email(), true);
+                    if (!kcUsers.isEmpty()) {
+                        String existingKcId = kcUsers.get(0).getId();
+                        log.info("Repairing registration for orphaned Keycloak user: {} ({})", request.email(), existingKcId);
+                        setUserPassword(existingKcId, request.password());
+                        User newUser = User.builder()
+                                .keycloakId(existingKcId)
+                                .displayName(request.fullName())
+                                .email(request.email())
+                                .role("ROLE_USER")
+                                .emailVerified(true)
+                                .active(true)
+                                .build();
+                        userRepository.saveAndFlush(newUser);
+                        assignDefaultRole(existingKcId);
+
+                        return SignUpResponse.builder()
+                                .id(existingKcId)
+                                .name(request.fullName())
+                                .email(request.email())
+                                .build();
+                    }
+                }
                 throw new BadRequestException("Email is already registered");
             }
+
             if (response.getStatus() != 201) {
                 throw new RuntimeException("Keycloak returned status: " + response.getStatus());
             }
@@ -71,25 +104,25 @@ public class AuthServiceImpl implements AuthService {
                     .displayName(request.fullName())
                     .email(request.email())
                     .role("ROLE_USER")
-                    .emailVerified(true)
+                    .emailVerified(false)
+                    .active(true)
                     .build();
 
             try {
-                userRepository.save(user);
+                userRepository.saveAndFlush(user);
                 setUserPassword(keycloakId, request.password());
                 assignDefaultRole(keycloakId);
+                sendKeycloakVerifyEmail(keycloakId);
             } catch (Exception ex) {
-                // Rollback: remove the Keycloak user to avoid orphaned accounts
+                // Rollback: remove Keycloak user to avoid orphaned accounts
                 log.error("Signup post-processing failed for keycloakId={}, rolling back Keycloak user", keycloakId, ex);
                 try {
                     keycloak.realm(realm).users().delete(keycloakId);
                 } catch (Exception cleanupEx) {
                     log.error("Failed to clean up Keycloak user {} after signup failure", keycloakId, cleanupEx);
                 }
-                throw new RuntimeException("Cannot create account. Please try again.");
+                throw new RuntimeException("Cannot create account. Please try again: " + ex.getMessage());
             }
-
-            // sendKeycloakVerifyEmail(keycloakId); // Commented out to stop 500 error
 
             return SignUpResponse.builder()
                     .id(keycloakId)
@@ -101,7 +134,7 @@ public class AuthServiceImpl implements AuthService {
             throw ex;
         } catch (Exception ex) {
             log.error("Create user failed", ex);
-            throw new RuntimeException("Cannot create account");
+            throw new RuntimeException("Cannot create account: " + ex.getMessage());
         }
     }
 
@@ -113,12 +146,17 @@ public class AuthServiceImpl implements AuthService {
         user.setFirstName(names[0]);
         user.setLastName(names.length > 1 ? names[1] : "");
         user.setEnabled(true);
-        user.setEmailVerified(true); // <-- Set to true in Keycloak
+        user.setEmailVerified(false);
         return user;
     }
 
     private void sendKeycloakVerifyEmail(String userId) {
-        keycloak.realm(realm).users().get(userId).executeActionsEmail(List.of("VERIFY_EMAIL"));
+        try {
+            keycloak.realm(realm).users().get(userId).executeActionsEmail(List.of("VERIFY_EMAIL"));
+            log.info("Dispatched verification email for Keycloak user {}", userId);
+        } catch (Exception ex) {
+            log.warn("Could not dispatch Keycloak verification email to user {}: {}", userId, ex.getMessage());
+        }
     }
 
     private void assignDefaultRole(String userId) {
@@ -127,7 +165,14 @@ public class AuthServiceImpl implements AuthService {
             var role = keycloak.realm(realm).roles().get(defaultRole).toRepresentation();
             user.roles().realmLevel().add(List.of(role));
         } catch (Exception ex) {
-            log.warn("Cannot assign role {}", defaultRole);
+            try {
+                String fallback = defaultRole.startsWith("ROLE_") ? defaultRole.substring(5) : "ROLE_" + defaultRole;
+                UserResource user = keycloak.realm(realm).users().get(userId);
+                var role = keycloak.realm(realm).roles().get(fallback).toRepresentation();
+                user.roles().realmLevel().add(List.of(role));
+            } catch (Exception fallbackEx) {
+                log.warn("Cannot assign default role {} to user {}: {}", defaultRole, userId, ex.getMessage());
+            }
         }
     }
 
@@ -146,12 +191,39 @@ public class AuthServiceImpl implements AuthService {
                 "password", request.password()
         ));
 
+        // Ensure user is provisioned in local database so user queries never fail
+        User localUser = userRepository.findByKeycloakId(user.getId())
+                .or(() -> userRepository.findByEmail(request.email()))
+                .map(existing -> {
+                    if (existing.getKeycloakId() == null) {
+                        existing.setKeycloakId(user.getId());
+                    }
+                    if (existing.getDisplayName() == null && user.getFirstName() != null) {
+                        String name = (user.getFirstName() + " " + (user.getLastName() != null ? user.getLastName() : "")).trim();
+                        if (!name.isEmpty()) existing.setDisplayName(name);
+                    }
+                    return userRepository.save(existing);
+                })
+                .orElseGet(() -> {
+                    String fullName = (user.getFirstName() != null ? (user.getFirstName() + " " + (user.getLastName() != null ? user.getLastName() : "")) : request.email()).trim();
+                    User newUser = User.builder()
+                            .keycloakId(user.getId())
+                            .email(request.email())
+                            .displayName(fullName.isEmpty() ? request.email() : fullName)
+                            .role("ROLE_USER")
+                            .emailVerified(true)
+                            .active(true)
+                            .build();
+                    return userRepository.save(newUser);
+                });
+
         return LoginResponse.builder()
                 .accessToken(token.accessToken())
                 .refreshToken(token.refreshToken())
                 .expiresIn(token.expiresIn())
                 .refreshExpiresIn(token.refreshExpiresIn())
                 .tokenType(token.tokenType())
+                .user(userMapper.toResponse(localUser))
                 .build();
     }
 
@@ -208,19 +280,10 @@ public class AuthServiceImpl implements AuthService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
         if (Boolean.TRUE.equals(user.isEmailVerified())) {
-            throw new BadRequestException("Email is already verified");
+            throw new BadRequestException("Email already verified");
         }
 
-        keycloak.realm(realm).users().get(user.getId()).executeActionsEmail(List.of("VERIFY_EMAIL"));
-    }
-
-    private void setUserPassword(String userId, String password) {
-        CredentialRepresentation credential = new CredentialRepresentation();
-        credential.setType(CredentialRepresentation.PASSWORD);
-        credential.setValue(password);
-        credential.setTemporary(false);
-
-        keycloak.realm(realm).users().get(userId).resetPassword(credential);
+        sendKeycloakVerifyEmail(user.getId());
     }
 
     @Override
@@ -230,11 +293,23 @@ public class AuthServiceImpl implements AuthService {
         form.add("client_secret", clientSecret);
         form.add("refresh_token", refreshToken);
 
-        keycloakRestClient.post()
-                .uri("/realms/{realm}/protocol/openid-connect/logout", realm)
-                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                .body(form)
-                .retrieve()
-                .toBodilessEntity();
+        try {
+            keycloakRestClient.post()
+                    .uri("/realms/{realm}/protocol/openid-connect/revoke", realm)
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .body(form)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (Exception ex) {
+            log.warn("Failed to revoke token in Keycloak: {}", ex.getMessage());
+        }
+    }
+
+    private void setUserPassword(String userId, String password) {
+        CredentialRepresentation credential = new CredentialRepresentation();
+        credential.setType(CredentialRepresentation.PASSWORD);
+        credential.setValue(password);
+        credential.setTemporary(false);
+        keycloak.realm(realm).users().get(userId).resetPassword(credential);
     }
 }

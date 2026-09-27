@@ -10,7 +10,10 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -38,5 +41,33 @@ public class AdminController {
     public ResponseEntity<ApiResponse<List<AuditLogResponse>>> getAuditLogs() {
         List<AuditLogResponse> logs = adminService.getRecentAuditLogs();
         return ResponseEntity.ok(ApiResponse.success("Audit logs retrieved", logs));
+    }
+
+    @Operation(summary = "Clear all audit activity logs", description = "Deletes all administrative audit logs from ledger.")
+    @DeleteMapping("/audit-logs")
+    public ResponseEntity<ApiResponse<Void>> clearAuditLogs() {
+        adminService.clearAuditLogs();
+        return ResponseEntity.ok(ApiResponse.success("Audit logs cleared successfully", null));
+    }
+
+    @Operation(summary = "Log an administrative action", description = "Records a new dynamic audit log event into the ledger.")
+    @PostMapping("/audit-logs")
+    public ResponseEntity<ApiResponse<Void>> createAuditLog(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal org.springframework.security.oauth2.jwt.Jwt jwt,
+            @RequestBody @jakarta.validation.Valid com.movie_app.movie_app_api.admin.dto.request.CreateAuditLogRequest request,
+            jakarta.servlet.http.HttpServletRequest httpRequest
+    ) {
+        String keycloakId = jwt != null ? jwt.getSubject() : null;
+        String clientIp = httpRequest != null ? httpRequest.getRemoteAddr() : "127.0.0.1";
+        adminService.logAction(
+                keycloakId,
+                request.action(),
+                request.targetType(),
+                request.targetId(),
+                request.details(),
+                clientIp,
+                request.status() != null ? request.status() : "SUCCESS"
+        );
+        return ResponseEntity.ok(ApiResponse.success("Audit log created", null));
     }
 }

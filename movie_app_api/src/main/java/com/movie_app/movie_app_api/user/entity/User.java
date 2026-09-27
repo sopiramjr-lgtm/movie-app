@@ -28,7 +28,7 @@ public class User extends BaseAuditEntity {
     @Column(name = "display_name")
     private String displayName;
 
-    @Column(name = "avatar_url", length = 500)
+    @Column(name = "avatar_url", columnDefinition = "TEXT")
     private String avatarUrl;
 
     @Column(nullable = false)
@@ -40,7 +40,7 @@ public class User extends BaseAuditEntity {
     @Column(nullable = false)
     private String role;
 
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "boolean default true")
     @Builder.Default
     private boolean active = true;
 

@@ -15,10 +15,13 @@ public interface SubscriptionService {
     // Plans (Admin & Public)
     SubscriptionPlanResponse createPlan(SubscriptionPlanRequest request);
     SubscriptionPlanResponse updatePlan(UUID planId, SubscriptionPlanRequest request);
+    void deletePlan(UUID planId);
     List<SubscriptionPlanResponse> getAllPlans();
 
     // Subscriptions (User)
     SubscriptionResponse subscribe(String keycloakId, SubscribeRequest request);
+    SubscriptionResponse verifyPayment(String keycloakId, UUID subscriptionId);
+    SubscriptionResponse getSubscriptionStatus(String keycloakId, UUID subscriptionId);
     List<SubscriptionResponse> getUserSubscriptions(String keycloakId);
     SubscriptionResponse cancelSubscription(String keycloakId, UUID subscriptionId);
 

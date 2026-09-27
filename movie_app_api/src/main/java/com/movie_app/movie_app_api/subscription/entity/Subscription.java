@@ -30,6 +30,7 @@ public class Subscription extends BaseAuditEntity {
     private LocalDateTime startedAt;
     private LocalDateTime currentPeriodEnd;
     private LocalDateTime cancelledAt;
+    private LocalDateTime qrExpiresAt;
 
     @OneToMany(mappedBy = "subscription", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default private List<Payment> payments = new ArrayList<>();

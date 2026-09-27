@@ -31,23 +31,50 @@ public class UserServiceImpl implements UserService {
     private final com.movie_app.movie_app_api.subscription.repository.SubscriptionRepository subscriptionRepository;
     private final com.movie_app.movie_app_api.profile.repository.ProfileRepository profileRepository;
     private final com.movie_app.movie_app_api.notification.repository.NotificationRepository notificationRepository;
+    private final com.movie_app.movie_app_api.core.service.CurrentUserService currentUserService;
 
     @Value("${keycloak.realm}")
     private String realm;
 
+    private User findOrProvisionUser(String keycloakId) {
+        return userRepository.findByKeycloakId(keycloakId)
+                .orElseGet(() -> {
+                    try {
+                        return currentUserService.requireCurrentUser();
+                    } catch (Exception e) {
+                        log.warn("Automatic user provisioning fallback for {}: {}", keycloakId, e.getMessage());
+                        try {
+                            var kcUser = keycloak.realm(realm).users().get(keycloakId).toRepresentation();
+                            String email = kcUser.getEmail() != null ? kcUser.getEmail() : keycloakId + "@placeholder.com";
+                            String fullName = ((kcUser.getFirstName() != null ? kcUser.getFirstName() : "") + " " + (kcUser.getLastName() != null ? kcUser.getLastName() : "")).trim();
+                            User newUser = User.builder()
+                                    .keycloakId(keycloakId)
+                                    .email(email)
+                                    .displayName(!fullName.isEmpty() ? fullName : (kcUser.getUsername() != null ? kcUser.getUsername() : email))
+                                    .role("ROLE_USER")
+                                    .emailVerified(Boolean.TRUE.equals(kcUser.isEmailVerified()))
+                                    .active(true)
+                                    .build();
+                            return userRepository.save(newUser);
+                        } catch (Exception kcEx) {
+                            log.error("Failed to provision user {} from Keycloak fallback: {}", keycloakId, kcEx.getMessage());
+                            throw new ResourceNotFoundException("User not found: " + keycloakId);
+                        }
+                    }
+                });
+    }
+
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public UserResponse getMe(String keycloakId) {
-        User user = userRepository.findByKeycloakId(keycloakId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        User user = findOrProvisionUser(keycloakId);
         return userMapper.toResponse(user);
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public com.movie_app.movie_app_api.user.dto.response.UserSummaryResponse getUserSummary(String keycloakId) {
-        User user = userRepository.findByKeycloakId(keycloakId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        User user = findOrProvisionUser(keycloakId);
 
         var subscriptions = subscriptionRepository.findByUser_KeycloakId(keycloakId);
         var activeSubOpt = subscriptions.stream()
@@ -72,12 +99,15 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public UserResponse updateUser(String keycloakId, UpdateUserRequest request) {
-        User user = userRepository.findByKeycloakId(keycloakId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        User user = findOrProvisionUser(keycloakId);
 
-        user.setDisplayName(request.displayName());
-        user.setAvatarUrl(request.avatarUrl());
-        userRepository.save(user);
+        if (request.displayName() != null && !request.displayName().isBlank()) {
+            user.setDisplayName(request.displayName().trim());
+        }
+        if (request.avatarUrl() != null) {
+            user.setAvatarUrl(request.avatarUrl());
+        }
+        user = userRepository.save(user);
 
         return userMapper.toResponse(user);
     }

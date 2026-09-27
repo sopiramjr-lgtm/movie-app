@@ -12,5 +12,7 @@ public record SubscriptionResponse(
         String status,
         LocalDateTime startedAt,
         LocalDateTime currentPeriodEnd,
-        LocalDateTime cancelledAt
+        LocalDateTime cancelledAt,
+        String paymentQrCode,
+        LocalDateTime qrExpiresAt
 ) {}

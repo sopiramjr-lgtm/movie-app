@@ -47,6 +47,21 @@ public class GenreServiceImpl implements GenreService {
 
     @Override
     @Transactional
+    public GenreResponse updateGenre(UUID id, GenreRequest request) {
+        Genre genre = genreRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Genre not found with id: " + id));
+
+        if (!genre.getName().equalsIgnoreCase(request.name()) && genreRepository.existsByNameIgnoreCase(request.name())) {
+            throw new BadRequestException("Genre with name '" + request.name() + "' already exists!");
+        }
+
+        genre.setName(request.name());
+        genre = genreRepository.save(genre);
+        return genreMapper.toResponse(genre);
+    }
+
+    @Override
+    @Transactional
     public void deleteGenre(UUID id) {
         if (!genreRepository.existsById(id)) {
             throw new ResourceNotFoundException("Genre not found with id: " + id);

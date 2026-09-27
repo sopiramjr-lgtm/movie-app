@@ -48,6 +48,13 @@ public class AdminSubscriptionController {
         return ResponseEntity.ok(ApiResponse.success("Plan updated successfully", plan));
     }
 
+    @Operation(summary = "Delete subscription plan", description = "Deletes a subscription pricing tier.")
+    @DeleteMapping("/plans/{planId}")
+    public ResponseEntity<ApiResponse<Void>> deletePlan(@PathVariable UUID planId) {
+        subscriptionService.deletePlan(planId);
+        return ResponseEntity.ok(ApiResponse.success("Plan deleted successfully", null));
+    }
+
     @Operation(summary = "Get all subscription plans", description = "Retrieves all subscription plans configured in the platform.")
     @GetMapping("/plans")
     public ResponseEntity<ApiResponse<List<SubscriptionPlanResponse>>> getAllPlans() {

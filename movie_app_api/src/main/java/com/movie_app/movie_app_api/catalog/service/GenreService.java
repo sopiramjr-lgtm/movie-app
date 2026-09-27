@@ -7,6 +7,7 @@ import java.util.UUID;
 
 public interface GenreService {
     GenreResponse createGenre(GenreRequest request);
+    GenreResponse updateGenre(UUID id, GenreRequest request);
     List<GenreResponse> getAllGenres();
     void deleteGenre(UUID id); // Changed to UUID
 }

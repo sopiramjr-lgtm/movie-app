@@ -30,6 +30,7 @@ public class SubscriptionMapper {
                 .startedAt(subscription.getStartedAt())
                 .currentPeriodEnd(subscription.getCurrentPeriodEnd())
                 .cancelledAt(subscription.getCancelledAt())
+                .qrExpiresAt(subscription.getQrExpiresAt())
                 .build();
     }
 
